@@ -1,0 +1,32 @@
+name: coffee
+
+services:
+  bot:
+    build: .
+    container_name: coffee-bot
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8081/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    volumes:
+      - botdata:/var/lib/coffee
+    networks:
+      - shared
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+
+networks:
+  shared:
+    external: true
+
+volumes:
+  botdata:

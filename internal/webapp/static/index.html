@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Coffee Order</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Menu Screen -->
+  <div id="screen-menu" class="screen">
+    <h1>&#9749; Coffee Order</h1>
+    <div id="categories" class="categories"></div>
+    <div id="menu-items" class="menu-grid"></div>
+    <div id="cart-bar" class="cart-bar" onclick="showCart()">
+      <span>&#128722; Cart (<span id="cart-count">0</span>)</span>
+      <span id="cart-total">$0.00</span>
+    </div>
+  </div>
+
+  <!-- Cart Screen -->
+  <div id="screen-cart" class="screen hidden">
+    <div class="header">
+      <button class="back-btn" onclick="showMenu()">&larr;</button>
+      <h2>&#128722; Your Cart</h2>
+    </div>
+    <div id="cart-items"></div>
+    <div class="total-row">
+      <span>Total</span>
+      <span id="cart-total-detail">$0.00</span>
+    </div>
+    <div class="pickup-section">
+      <label>Pickup time:</label>
+      <div id="pickup-options" class="pickup-options"></div>
+    </div>
+    <button id="checkout-btn" class="btn-primary" onclick="placeOrder()">Place Order &amp; Pay</button>
+  </div>
+
+  <!-- Payment Screen -->
+  <div id="screen-payment" class="screen hidden">
+    <div class="payment-info">
+      <h2 id="payment-order-no">Order #0</h2>
+      <p id="payment-amount">$0.00</p>
+      <p id="payment-pickup">Pickup: ASAP</p>
+    </div>
+    <div class="qr-section">
+      <img id="qr-image" src="" alt="PayNow QR Code">
+    </div>
+    <p class="qr-hint">Scan with your bank app to pay</p>
+    <p class="qr-timer">&#9201; QR valid for 1 hour</p>
+    <div id="payment-status" class="payment-status">
+      <div class="spinner"></div>
+      <p>Waiting for payment&hellip;</p>
+    </div>
+  </div>
+
+  <!-- Success Screen -->
+  <div id="screen-success" class="screen hidden">
+    <div class="success-icon">&#9989;</div>
+    <h2>Paid!</h2>
+    <p id="success-order">Order #0</p>
+    <p id="success-detail">$0.00 &middot; Pickup: ASAP</p>
+    <p class="pickup-instruction">Show your order number at the counter</p>
+    <button class="btn-primary" onclick="Telegram.WebApp.close()">Close</button>
+  </div>
+
+  <!-- Error Screen -->
+  <div id="screen-error" class="screen hidden">
+    <div class="error-icon">&#9888;</div>
+    <h2>Something went wrong</h2>
+    <p id="error-message"></p>
+    <button class="btn-primary" onclick="showMenu()">Back to Menu</button>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+name: coffee-dev
+
+services:
+  bot:
+    build: .
+    container_name: coffee-bot-dev
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+      - "8083:8083"
+    volumes:
+      - botdata:/var/lib/coffee
+    restart: unless-stopped
+
+volumes:
+  botdata:

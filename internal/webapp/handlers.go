@@ -1,0 +1,330 @@
+package webapp
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/caijiawei02/telegram-order-bot/internal/model"
+	"github.com/caijiawei02/telegram-order-bot/internal/payment"
+	"github.com/caijiawei02/telegram-order-bot/internal/storage"
+)
+
+// --- shared helpers ---
+
+func writeJSON(w http.ResponseWriter, code int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(v)
+}
+
+func writeError(w http.ResponseWriter, code int, msg string) {
+	writeJSON(w, code, map[string]string{"error": msg})
+}
+
+// requireAuth checks the session cookie and returns the user, or writes 401.
+func (s *Server) requireAuth(r *http.Request) *SessionUser {
+	user := verifySessionCookie(r, s.deps.SessionSecret)
+	if user == nil {
+		return nil
+	}
+	return user
+}
+
+// --- menu ---
+
+func (s *Server) handleMenu(w http.ResponseWriter, r *http.Request) {
+	user := s.requireAuth(r)
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	items, err := storage.LoadMenu(s.deps.DB)
+	if err != nil {
+		fmt.Printf("load menu: %v\n", err)
+		writeError(w, http.StatusInternalServerError, "failed to load menu")
+		return
+	}
+	type menuItemResp struct {
+		ID         int64  `json:"id"`
+		SKU        string `json:"sku"`
+		Name       string `json:"name"`
+		Category   string `json:"category"`
+		PriceCents int    `json:"price_cents"`
+	}
+	out := make([]menuItemResp, 0, len(items))
+	for _, m := range items {
+		out = append(out, menuItemResp{
+			ID: m.ID, SKU: m.SKU, Name: m.Name,
+			Category: m.Category, PriceCents: m.PriceCents,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// --- create order ---
+
+type createOrderReq struct {
+	Items         []createOrderItem `json:"items"`
+	PickupMinutes int               `json:"pickup_minutes"`
+	Note          string            `json:"note"`
+}
+
+type createOrderItem struct {
+	SKU      string `json:"sku"`
+	Quantity int    `json:"quantity"`
+}
+
+type createOrderResp struct {
+	OrderID      int64  `json:"order_id"`
+	OrderNo      int    `json:"order_no"`
+	TotalCents   int    `json:"total_cents"`
+	QRImageURL   string `json:"qr_url"`
+	PaymentIntentID string `json:"payment_intent_id"`
+}
+
+func (s *Server) handleOrders(w http.ResponseWriter, r *http.Request) {
+	user := s.requireAuth(r)
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if r.Method == http.MethodGet {
+		s.listOrders(w, r, user)
+		return
+	}
+	if r.Method == http.MethodPost {
+		s.createOrder(w, r, user)
+		return
+	}
+	writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+}
+
+func (s *Server) createOrder(w http.ResponseWriter, r *http.Request, user *SessionUser) {
+	var req createOrderReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	if len(req.Items) == 0 {
+		writeError(w, http.StatusBadRequest, "cart is empty")
+		return
+	}
+
+	// Validate items and compute total from the DB menu (never trust client prices).
+	var orderItems []model.OrderItem
+	totalCents := 0
+	for _, ri := range req.Items {
+		if ri.Quantity < 1 || ri.Quantity > 20 {
+			writeError(w, http.StatusBadRequest, "invalid quantity")
+			return
+		}
+		mi, err := storage.MenuItemBySKU(s.deps.DB, ri.SKU)
+		if err != nil {
+			fmt.Printf("lookup menu item %s: %v\n", ri.SKU, err)
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		if mi == nil || !mi.Available {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("item %s not available", ri.SKU))
+			return
+		}
+		orderItems = append(orderItems, model.OrderItem{
+			SKU:       mi.SKU,
+			Name:      mi.Name,
+			UnitCents: mi.PriceCents,
+			Quantity:  ri.Quantity,
+		})
+		totalCents += mi.PriceCents * ri.Quantity
+	}
+
+	// Validate pickup minutes.
+	validPickup := false
+	for _, opt := range []int{0, 15, 30, 45} {
+		if req.PickupMinutes == opt {
+			validPickup = true
+			break
+		}
+	}
+	if !validPickup {
+		writeError(w, http.StatusBadRequest, "invalid pickup time")
+		return
+	}
+
+	// Upsert customer to get the DB id.
+	custID, err := storage.UpsertCustomer(s.deps.DB, user.UserID, user.Username, user.FirstName)
+	if err != nil {
+		fmt.Printf("upsert customer: %v\n", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	// Get next order number.
+	orderNo, err := storage.NextOrderNo(s.deps.DB)
+	if err != nil {
+		fmt.Printf("next order no: %v\n", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	// Create the order (status=awaiting_payment, no payment intent yet).
+	orderID, err := storage.CreateOrder(s.deps.DB, model.Order{
+		OrderNo:       orderNo,
+		CustomerID:    custID,
+		UserID:        user.UserID,
+		ChatID:        user.UserID, // DM chat id == user id in Telegram
+		TotalCents:    totalCents,
+		PickupMinutes: req.PickupMinutes,
+		Note:          req.Note,
+		CreatedAt:     time.Now().UTC(),
+	}, orderItems)
+	if err != nil {
+		fmt.Printf("create order: %v\n", err)
+		writeError(w, http.StatusInternalServerError, "failed to create order")
+		return
+	}
+
+	// Create + confirm the Stripe PayNow PaymentIntent.
+	desc := fmt.Sprintf("Order #%d — %d items", orderNo, len(orderItems))
+	piID, err := payment.CreatePayNowIntent(s.deps.StripeSecret, totalCents, orderID, orderNo, desc)
+	if err != nil {
+		fmt.Printf("create payment intent: %v\n", err)
+		writeError(w, http.StatusInternalServerError, "payment setup failed")
+		return
+	}
+	_ = storage.SetPaymentIntent(s.deps.DB, orderID, piID)
+
+	result, err := payment.ConfirmPayNow(s.deps.StripeSecret, piID)
+	if err != nil {
+		fmt.Printf("confirm payment intent: %v\n", err)
+		writeError(w, http.StatusInternalServerError, "payment confirmation failed")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, createOrderResp{
+		OrderID:         orderID,
+		OrderNo:         orderNo,
+		TotalCents:      totalCents,
+		QRImageURL:      result.QRImageURL,
+		PaymentIntentID: piID,
+	})
+}
+
+func (s *Server) listOrders(w http.ResponseWriter, r *http.Request, user *SessionUser) {
+	cust, err := storage.CustomerByUserID(s.deps.DB, user.UserID)
+	if err != nil {
+		fmt.Printf("lookup customer: %v\n", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if cust == nil {
+		writeJSON(w, http.StatusOK, []any{})
+		return
+	}
+	orders, err := storage.OrdersByCustomer(s.deps.DB, cust.ID, 20)
+	if err != nil {
+		fmt.Printf("list orders: %v\n", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	type orderResp struct {
+		OrderNo      int    `json:"order_no"`
+		Status       string `json:"status"`
+		TotalCents   int    `json:"total_cents"`
+		PickupMinutes int   `json:"pickup_minutes"`
+		CreatedAt    string `json:"created_at"`
+	}
+	out := make([]orderResp, 0, len(orders))
+	for _, o := range orders {
+		out = append(out, orderResp{
+			OrderNo: o.OrderNo,
+			Status:  o.Status,
+			TotalCents: o.TotalCents,
+			PickupMinutes: o.PickupMinutes,
+			CreatedAt: o.CreatedAt.Format(time.RFC3339),
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// --- order status (polled by frontend) ---
+
+type orderStatusResp struct {
+	OrderNo         int    `json:"order_no"`
+	Status          string `json:"status"`
+	TotalCents      int    `json:"total_cents"`
+	PickupMinutes   int    `json:"pickup_minutes"`
+	PaymentIntentID string `json:"payment_intent_id"`
+}
+
+func (s *Server) handleOrderStatus(w http.ResponseWriter, r *http.Request) {
+	user := s.requireAuth(r)
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	// Extract order id from path: /api/orders/{id}
+	path := strings.TrimPrefix(r.URL.Path, "/api/orders/")
+	if path == "" {
+		writeError(w, http.StatusBadRequest, "missing order id")
+		return
+	}
+	orderID, err := strconv.ParseInt(path, 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid order id")
+		return
+	}
+
+	order, err := storage.OrderByID(s.deps.DB, orderID)
+	if err != nil {
+		fmt.Printf("lookup order: %v\n", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if order == nil {
+		writeError(w, http.StatusNotFound, "order not found")
+		return
+	}
+	// Security: only the owner can see their order.
+	if order.UserID != user.UserID {
+		writeError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+
+	// If still awaiting_payment, poll Stripe to check if paid (fallback if
+	// the webhook hasn't fired yet).
+	if order.Status == model.StatusAwaitingPayment && order.StripePaymentIntent != "" {
+		status, chargeID, err := payment.GetIntentStatus(s.deps.StripeSecret, order.StripePaymentIntent)
+		if err == nil && status == "succeeded" {
+			_ = storage.MarkPaid(s.deps.DB, order.ID, chargeID)
+			order.Status = model.StatusPaid
+			// Notify staff (best effort) — handled by the webhook normally;
+			// the polling path is a fallback.
+		}
+	}
+
+	resp := orderStatusResp{
+		OrderNo:         order.OrderNo,
+		Status:          order.Status,
+		TotalCents:      order.TotalCents,
+		PickupMinutes:   order.PickupMinutes,
+		PaymentIntentID: order.StripePaymentIntent,
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// downloadQR fetches the QR image bytes from a URL (used if the bot needs to
+// forward the QR to chat, though in the web app flow the frontend loads it
+// directly).
+func downloadQR(url string) ([]byte, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return io.ReadAll(resp.Body)
+}
