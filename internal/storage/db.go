@@ -29,7 +29,6 @@ CREATE TABLE IF NOT EXISTS customers (
 	id           INTEGER PRIMARY KEY AUTOINCREMENT,
 	user_id      INTEGER NOT NULL UNIQUE,
 	username     TEXT NOT NULL DEFAULT '',
-	first_name   TEXT NOT NULL DEFAULT '',
 	last_seen_at TEXT NOT NULL
 );
 

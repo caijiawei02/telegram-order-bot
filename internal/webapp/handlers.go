@@ -173,7 +173,7 @@ func (s *Server) createOrder(w http.ResponseWriter, r *http.Request, user *Sessi
 	}
 
 	// Upsert customer to get the DB id.
-	custID, err := storage.UpsertCustomer(s.deps.DB, user.UserID, user.Username, user.FirstName)
+	custID, err := storage.UpsertCustomer(s.deps.DB, user.UserID, user.Username)
 	if err != nil {
 		fmt.Printf("upsert customer: %v\n", err)
 		writeError(w, http.StatusInternalServerError, "internal error")

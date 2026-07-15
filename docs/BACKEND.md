@@ -77,9 +77,13 @@ cents. No float arithmetic in the backend.
 |---|---|---|
 | id | INTEGER PK AUTOINCREMENT | |
 | user_id | INTEGER NOT NULL UNIQUE | Telegram user id |
-| username | TEXT NOT NULL DEFAULT '' | |
-| first_name | TEXT NOT NULL DEFAULT '' | |
+| username | TEXT NOT NULL DEFAULT '' | Telegram `@username`; never clobbered with `""` on update |
 | last_seen_at | TEXT (RFC3339 UTC) | updated on every auth |
+
+Note: `first_name` was removed from this table. The app relies solely on
+`username` (Telegram users in this deployment all have a public `@username`).
+Existing tables must be wiped when deploying this change (the `first_name`
+column is no longer created by migrations).
 
 ### `menu_items`
 | column | type | notes |
@@ -258,9 +262,17 @@ nginx routes `/tg/` → :8080, `/stripe/` → :8083, everything else → :8083.
 2. POST /api/auth with `{init_data: "..."}`.
 3. Backend verifies HMAC: `secret = HMAC_SHA256("WebAppData", bot_token)`,
    then `hash == HMAC_SHA256(secret, sorted_data_check_string)`.
-4. Backend upserts customer, sets signed HttpOnly session cookie
-   (`userID|expires|HMAC(userID|expires, SESSION_SECRET)`).
-5. Subsequent API calls use the cookie. No session state in DB.
+4. Backend extracts `user.id` + `user.username` from the signed `user` JSON,
+   upserts the customer (a non-empty username never overwrites an existing
+   one — see `UpsertCustomer`), and sets a signed HttpOnly session cookie
+   `userID|expires|username|HMAC(userID|expires|username, SESSION_SECRET)`
+   (`username` is URL-escaped so it can't contain the `|` delimiter).
+5. Subsequent API calls carry the cookie; `verifySessionCookie` returns a
+   fully-populated `SessionUser{UserID, Username}`, so later upserts (e.g. on
+   order creation) keep using the real username instead of `""`. A legacy
+   3-field cookie (`userID|expires|sig`, no username) is still accepted for
+   in-flight sessions; it re-auths on the next `/api/auth` and gets upgraded.
+   No session state in DB.
 
 ## Cron jobs
 

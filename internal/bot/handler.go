@@ -111,7 +111,7 @@ func (h *Handler) trackUser(c telebot.Context) error {
 		return nil
 	}
 	u := m.Sender
-	_, err := storage.UpsertCustomer(h.db, u.ID, u.Username, u.FirstName)
+	_, err := storage.UpsertCustomer(h.db, u.ID, u.Username)
 	if err != nil {
 		log.Printf("upsert user %d: %v", u.ID, err)
 	}
@@ -361,18 +361,12 @@ func (h *Handler) NotifyCustomerPaid(orderID int64) {
 	h.bot.Send(&telebot.Chat{ID: order.ChatID}, msg)
 }
 
-// displayName returns @username, or first name, or "User <id>" as fallback.
+// displayName returns the customer's @username for staff-facing messages.
 func displayName(c *model.Customer) string {
 	if c == nil {
 		return "Unknown"
 	}
-	if c.Username != "" {
-		return "@" + c.Username
-	}
-	if c.FirstName != "" {
-		return c.FirstName
-	}
-	return fmt.Sprintf("User %d", c.UserID)
+	return "@" + c.Username
 }
 
 // notifyCustomerReady DMs the customer that their order is ready, with

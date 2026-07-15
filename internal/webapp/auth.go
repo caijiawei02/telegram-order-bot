@@ -21,9 +21,8 @@ const sessionLifetime = 7 * 24 * time.Hour
 
 // SessionUser holds the authenticated user's Telegram identity.
 type SessionUser struct {
-	UserID    int64
-	Username  string
-	FirstName string
+	UserID   int64
+	Username string
 }
 
 // verifyInitData validates the Telegram WebApp initData string and extracts
@@ -83,17 +82,15 @@ func verifyInitData(initData, botToken string) *SessionUser {
 		return nil
 	}
 	var u struct {
-		ID        int64  `json:"id"`
-		Username  string `json:"username"`
-		FirstName string `json:"first_name"`
+		ID       int64  `json:"id"`
+		Username string `json:"username"`
 	}
 	if err := json.Unmarshal([]byte(userJSON), &u); err != nil {
 		return nil
 	}
 	return &SessionUser{
-		UserID:    u.ID,
-		Username:  u.Username,
-		FirstName: u.FirstName,
+		UserID:   u.ID,
+		Username: u.Username,
 	}
 }
 
@@ -111,26 +108,55 @@ func makeSessionCookie(u SessionUser, sessionSecret string) *http.Cookie {
 	}
 }
 
-// signSession creates "userID|expires|hmac(userID|expires)".
+// signSession creates "userID|expires|username|hmac(...)".
+// username is URL-escaped so it cannot contain the "|" delimiter. Carrying the
+// username in the cookie keeps it available on every authenticated request,
+// so subsequent upserts don't clobber the real value with an empty string.
 func signSession(u SessionUser, sessionSecret string, expires time.Time) string {
 	expStr := strconv.FormatInt(expires.Unix(), 10)
-	payload := fmt.Sprintf("%d|%s", u.UserID, expStr)
+	username := url.QueryEscape(u.Username)
+	payload := fmt.Sprintf("%d|%s|%s", u.UserID, expStr, username)
 	h := hmac.New(sha256.New, []byte(sessionSecret))
 	h.Write([]byte(payload))
 	sig := hex.EncodeToString(h.Sum(nil))
-	return fmt.Sprintf("%d|%s|%s", u.UserID, expStr, sig)
+	return fmt.Sprintf("%s|%s", payload, sig)
 }
 
 // verifySessionCookie validates the session cookie and returns the user.
-// Returns nil if the cookie is missing, tampered, or expired.
+// Returns nil if the cookie is missing, tampered, or expired. Falls back to
+// the legacy 3-field format (userID|expires|sig) so existing cookies issued
+// by older builds re-auth gracefully on the next /api/auth call.
 func verifySessionCookie(r *http.Request, sessionSecret string) *SessionUser {
 	cookie, err := r.Cookie("session")
 	if err != nil {
 		return nil
 	}
-	parts := strings.SplitN(cookie.Value, "|", 3)
-	if len(parts) != 3 {
-		return nil
+	parts := strings.SplitN(cookie.Value, "|", 4)
+	if len(parts) != 4 {
+		// Legacy format: userID|expires|sig (no username).
+		legacy := strings.SplitN(cookie.Value, "|", 3)
+		if len(legacy) != 3 {
+			return nil
+		}
+		userID, err := strconv.ParseInt(legacy[0], 10, 64)
+		if err != nil {
+			return nil
+		}
+		expUnix, err := strconv.ParseInt(legacy[1], 10, 64)
+		if err != nil {
+			return nil
+		}
+		if time.Now().Unix() > expUnix {
+			return nil
+		}
+		payload := fmt.Sprintf("%d|%s", userID, legacy[1])
+		h := hmac.New(sha256.New, []byte(sessionSecret))
+		h.Write([]byte(payload))
+		expectedSig := hex.EncodeToString(h.Sum(nil))
+		if !hmac.Equal([]byte(legacy[2]), []byte(expectedSig)) {
+			return nil
+		}
+		return &SessionUser{UserID: userID}
 	}
 	userID, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
@@ -143,15 +169,22 @@ func verifySessionCookie(r *http.Request, sessionSecret string) *SessionUser {
 	if time.Now().Unix() > expUnix {
 		return nil
 	}
+	username, err := url.QueryUnescape(parts[2])
+	if err != nil {
+		return nil
+	}
 	// Recompute signature.
-	payload := fmt.Sprintf("%d|%s", userID, parts[1])
+	payload := fmt.Sprintf("%d|%s|%s", userID, parts[1], parts[2])
 	h := hmac.New(sha256.New, []byte(sessionSecret))
 	h.Write([]byte(payload))
 	expectedSig := hex.EncodeToString(h.Sum(nil))
-	if !hmac.Equal([]byte(parts[2]), []byte(expectedSig)) {
+	if !hmac.Equal([]byte(parts[3]), []byte(expectedSig)) {
 		return nil
 	}
-	return &SessionUser{UserID: userID}
+	return &SessionUser{
+		UserID:   userID,
+		Username: username,
+	}
 }
 
 // handleAuth verifies the Telegram initData, upserts the customer, and sets
@@ -177,7 +210,7 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid init_data", http.StatusUnauthorized)
 		return
 	}
-	_, err := storage.UpsertCustomer(s.deps.DB, user.UserID, user.Username, user.FirstName)
+	_, err := storage.UpsertCustomer(s.deps.DB, user.UserID, user.Username)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "upsert customer: %v\n", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -185,8 +218,7 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, makeSessionCookie(*user, s.deps.SessionSecret))
 	json.NewEncoder(w).Encode(map[string]any{
-		"user_id":    user.UserID,
-		"username":   user.Username,
-		"first_name": user.FirstName,
+		"user_id":  user.UserID,
+		"username": user.Username,
 	})
 }

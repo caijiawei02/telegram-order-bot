@@ -7,6 +7,5 @@ type Customer struct {
 	ID         int64
 	UserID     int64 // Telegram user id
 	Username   string
-	FirstName  string
 	LastSeenAt time.Time // UTC
 }
