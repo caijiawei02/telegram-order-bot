@@ -37,6 +37,7 @@ func NewHandler(b *telebot.Bot, db *sql.DB, sgt *time.Location, staffChatID int6
 func (h *Handler) Register() {
 	h.bot.Handle("/start", h.onStart)
 	h.bot.Handle("/help", h.onHelp)
+	h.bot.Handle("/chatid", h.onChatID)
 	// Staff commands (scoped to staff group via isStaffChat guard inside).
 	h.bot.Handle("/ready", h.onReady)
 	h.bot.Handle("/done", h.onDone)
@@ -80,8 +81,18 @@ func (h *Handler) onHelp(c telebot.Context) error {
 			"Tap the Order Coffee button to browse the menu, add items to your cart, and pay with PayNow.\n\n" +
 			"Commands:\n" +
 			"/start \u2014 open the order menu\n" +
+			"/chatid \u2014 show this chat's id\n" +
 			"/help \u2014 show this help",
 	)
+}
+
+// onChatID replies with the current chat id. Works in any chat (DM or group).
+func (h *Handler) onChatID(c telebot.Context) error {
+	m := c.Message()
+	if m == nil || m.Chat == nil {
+		return nil
+	}
+	return c.Reply(fmt.Sprintf("chat_id: %d", m.Chat.ID))
 }
 
 // trackUser upserts the sender into the customers table.
