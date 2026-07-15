@@ -59,8 +59,9 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/auth", s.handleAuth)
 	s.mux.HandleFunc("/api/menu", s.handleMenu)
 	s.mux.HandleFunc("/api/orders", s.handleOrders)
-	s.mux.HandleFunc("/api/orders/test-pay/", s.handleTestPay) // POST, before /api/orders/
-	s.mux.HandleFunc("/api/orders/", s.handleOrderStatus)      // /api/orders/{id}
+	s.mux.HandleFunc("/api/orders/pending", s.handlePendingOrder) // before /api/orders/
+	s.mux.HandleFunc("/api/orders/test-pay/", s.handleTestPay)   // POST, before /api/orders/
+	s.mux.HandleFunc("/api/orders/", s.handleOrderStatus)        // /api/orders/{id}
 
 	// Health.
 	s.mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {

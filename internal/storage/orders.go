@@ -101,6 +101,22 @@ func OrderByOrderNo(db *sql.DB, orderNo int) (*model.Order, error) {
 	return scanOrder(row)
 }
 
+// PendingOrderByUser returns the user's most recent awaiting_payment order,
+// or nil if they have none.
+func PendingOrderByUser(db *sql.DB, userID int64) (*model.Order, error) {
+	row := db.QueryRow(
+		`SELECT id, order_no, customer_id, user_id, chat_id, status, total_cents,
+		        pickup_minutes, note, stripe_payment_intent, stripe_charge_id,
+		        created_at, paid_at
+		 FROM orders
+		 WHERE user_id = ? AND status = ?
+		 ORDER BY created_at DESC
+		 LIMIT 1`,
+		userID, model.StatusAwaitingPayment,
+	)
+	return scanOrder(row)
+}
+
 func scanOrder(row *sql.Row) (*model.Order, error) {
 	var o model.Order
 	var createdStr, paidStr string

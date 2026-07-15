@@ -89,7 +89,7 @@ h2 {
   margin-bottom: 12px;
 }
 
-.add-btn {
+.menu-card .add-btn {
   width: 100%;
   padding: 8px;
   border: none;
@@ -99,6 +99,10 @@ h2 {
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
+}
+
+.menu-card .qty-control {
+  justify-content: center;
 }
 
 /* Cart bar */
@@ -268,6 +272,8 @@ h2 {
   width: 240px;
   height: 240px;
   border-radius: 12px;
+  pointer-events: none;
+  user-select: none;
 }
 
 .qr-hint {

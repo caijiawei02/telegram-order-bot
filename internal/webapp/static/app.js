@@ -106,26 +106,59 @@
       card.className = 'menu-card';
       card.innerHTML =
         '<div class="item-name">' + esc(m.name) + '</div>' +
-        '<div class="item-price">' + fmt(m.price_cents) + '</div>';
-      var btn = document.createElement('button');
-      btn.className = 'add-btn';
-      btn.textContent = '+ Add';
-      btn.onclick = function () { addToCart(m.sku); };
-      card.appendChild(btn);
+        '<div class="item-price">' + fmt(m.price_cents) + '</div>' +
+        '<div id="card-btn-' + m.sku + '"></div>';
       el.appendChild(card);
+      renderCardButton(m.sku);
     });
+  }
+
+  function renderCardButton(sku) {
+    var container = document.getElementById('card-btn-' + sku);
+    if (!container) return;
+    var qty = cart[sku] || 0;
+    if (qty === 0) {
+      container.innerHTML = '<button class="add-btn" data-act="add">+ Add</button>';
+      container.querySelector('[data-act="add"]').onclick = function () { addToCart(sku); };
+    } else {
+      container.innerHTML =
+        '<div class="qty-control">' +
+        '<button class="qty-btn" data-act="dec">\u2212</button>' +
+        '<span class="qty-display">' + qty + '</span>' +
+        '<button class="qty-btn" data-act="inc">+</button>' +
+        '</div>';
+      container.querySelector('[data-act="dec"]').onclick = function () { setQty(sku, qty - 1); };
+      container.querySelector('[data-act="inc"]').onclick = function () { setQty(sku, qty + 1); };
+    }
   }
 
   // --- Cart ---
   function addToCart(sku) {
     cart[sku] = (cart[sku] || 0) + 1;
+    saveCart();
     updateCartBar();
+    renderCardButton(sku);
   }
 
   function setQty(sku, qty) {
     if (qty <= 0) { delete cart[sku]; } else { cart[sku] = qty; }
+    saveCart();
     updateCartBar();
     renderCart();
+    renderCardButton(sku);
+  }
+
+  function saveCart() {
+    try { localStorage.setItem('coffee_cart', JSON.stringify(cart)); } catch (e) {}
+  }
+
+  function loadCart() {
+    try { cart = JSON.parse(localStorage.getItem('coffee_cart') || '{}'); } catch (e) { cart = {}; }
+  }
+
+  function clearCart() {
+    cart = {};
+    try { localStorage.removeItem('coffee_cart'); } catch (e) {}
   }
 
   function cartTotal() {
@@ -265,6 +298,7 @@
   function showSuccessScreen(o) {
     document.getElementById('success-order').textContent = 'Order #' + o.order_no;
     document.getElementById('success-detail').textContent = fmt(o.total_cents) + ' - Pickup: ' + (o.pickup_time || 'ASAP');
+    clearCart();
     showSuccess();
   }
 
@@ -305,7 +339,23 @@
 
   // --- Init ---
   authenticate().then(function () {
-    loadMenu();
+    // 1. Check for a pending payment first.
+    api('GET', '/api/orders/pending').then(function (resp) {
+      if (resp) {
+        // Resume the payment screen.
+        showPaymentScreen(resp);
+        return;
+      }
+      // 2. No pending payment — restore cart + load menu.
+      loadCart();
+      updateCartBar();
+      loadMenu();
+    }).catch(function () {
+      // Fallback: just load the menu.
+      loadCart();
+      updateCartBar();
+      loadMenu();
+    });
   });
 
   // Expose for onclick handlers.

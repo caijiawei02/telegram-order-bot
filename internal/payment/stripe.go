@@ -81,3 +81,19 @@ func GetIntentStatus(secretKey string, paymentIntentID string) (status string, c
 	}
 	return string(pi.Status), charge, nil
 }
+
+// GetPayNowQR re-fetches a PaymentIntent and returns the live PayNow QR URL.
+// If the PaymentIntent is no longer in requires_action (expired/canceled/
+// succeeded), expired is true and qrURL is empty.
+func GetPayNowQR(secretKey, paymentIntentID string) (qrURL string, expired bool, err error) {
+	stripe.Key = secretKey
+	pi, err := pintent.Get(paymentIntentID, nil)
+	if err != nil {
+		return "", false, fmt.Errorf("get payment intent: %w", err)
+	}
+	if pi.Status != stripe.PaymentIntentStatusRequiresAction ||
+		pi.NextAction == nil || pi.NextAction.PayNowDisplayQRCode == nil {
+		return "", true, nil
+	}
+	return pi.NextAction.PayNowDisplayQRCode.ImageURLPNG, false, nil
+}

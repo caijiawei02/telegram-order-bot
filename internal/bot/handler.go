@@ -142,8 +142,7 @@ func (h *Handler) onReadyBtn(c telebot.Context) error {
 	// Edit the staff message: remove buttons, append status.
 	h.editStaffOrderMessage(c, order, "Ready")
 	// DM the customer.
-	h.bot.Send(&telebot.Chat{ID: order.ChatID},
-		fmt.Sprintf("\u2615 Order #%d is ready for pickup! Show #%d at the counter.", order.OrderNo, order.OrderNo))
+	h.notifyCustomerReady(order)
 	return c.Respond(&telebot.CallbackResponse{Text: "Marked ready"})
 }
 
@@ -226,8 +225,7 @@ func (h *Handler) onReadyCmd(c telebot.Context) error {
 	if err := storage.SetStatus(h.db, order.ID, model.StatusReady); err != nil {
 		return c.Reply("Internal error, please try again.")
 	}
-	h.bot.Send(&telebot.Chat{ID: order.ChatID},
-		fmt.Sprintf("\u2615 Order #%d is ready for pickup! Show #%d at the counter.", order.OrderNo, order.OrderNo))
+	h.notifyCustomerReady(order)
 	return c.Reply(fmt.Sprintf("\u2705 #%d marked ready.", orderNo))
 }
 
@@ -375,4 +373,17 @@ func displayName(c *model.Customer) string {
 		return c.FirstName
 	}
 	return fmt.Sprintf("User %d", c.UserID)
+}
+
+// notifyCustomerReady DMs the customer that their order is ready, with
+// itemized order details.
+func (h *Handler) notifyCustomerReady(order *model.Order) {
+	items, _ := storage.OrderItems(h.db, order.ID)
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("\u2615 Order #%d is ready for pickup!\n\n", order.OrderNo))
+	for _, it := range items {
+		sb.WriteString(fmt.Sprintf("%d\u00D7 %s\n", it.Quantity, it.Name))
+	}
+	sb.WriteString(fmt.Sprintf("\nShow #%d at the counter.", order.OrderNo))
+	h.bot.Send(&telebot.Chat{ID: order.ChatID}, sb.String())
 }

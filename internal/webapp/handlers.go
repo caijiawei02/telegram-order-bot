@@ -271,6 +271,63 @@ func (s *Server) listOrders(w http.ResponseWriter, r *http.Request, user *Sessio
 	writeJSON(w, http.StatusOK, out)
 }
 
+// --- pending order (resume after reopen) ---
+
+type pendingOrderResp struct {
+	OrderID    int64  `json:"order_id"`
+	OrderNo    int    `json:"order_no"`
+	TotalCents int    `json:"total_cents"`
+	PickupTime string `json:"pickup_time"`
+	QRImageURL string `json:"qr_url"`
+	TestMode   bool   `json:"test_mode"`
+}
+
+func (s *Server) handlePendingOrder(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	user := s.requireAuth(r)
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	order, err := storage.PendingOrderByUser(s.deps.DB, user.UserID)
+	if err != nil {
+		fmt.Printf("pending order query: %v\n", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if order == nil {
+		writeJSON(w, http.StatusOK, nil)
+		return
+	}
+
+	// Re-fetch the QR from Stripe.
+	qrURL, expired, err := payment.GetPayNowQR(s.deps.StripeSecret, order.StripePaymentIntent)
+	if err != nil {
+		fmt.Printf("re-fetch qr (order %d): %v\n", order.ID, err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if expired {
+		// PaymentIntent expired — mark the order failed so the user starts fresh.
+		_ = storage.SetStatus(s.deps.DB, order.ID, model.StatusFailed)
+		writeJSON(w, http.StatusOK, nil)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, pendingOrderResp{
+		OrderID:    order.ID,
+		OrderNo:    order.OrderNo,
+		TotalCents: order.TotalCents,
+		PickupTime: pickupLabel(order.PickupMinutes, order.CreatedAt, s.deps.SGT),
+		QRImageURL: qrURL,
+		TestMode:   s.isTestMode(),
+	})
+}
+
 // --- order status (polled by frontend) ---
 
 type orderStatusResp struct {
