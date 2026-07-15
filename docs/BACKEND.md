@@ -2,7 +2,8 @@
 
 A Telegram Web App bot for ordering coffee with PayNow (Stripe) payment and
 in-store pickup. Customers browse a menu in an embedded Telegram Web App,
-add items to a cart, pay via PayNow QR, and pick up at the counter.
+add items to a cart, pay via PayNow QR, and pick up at the counter. Staff
+manage orders via inline buttons in a Telegram group.
 
 ## Stack
 
@@ -24,30 +25,37 @@ cmd/bot/main.go              Entrypoint: load env, open DB, seed menu, start
                              cron (00:00 cleanup, 23:59 daily summary), /health.
 internal/
   bot/
-    handler.go               /start (Web App button), /help, staff commands
-                             (/ready, /done, /cancel, /orders), NotifyStaffNewOrder.
+    handler.go               /start (Web App button), /help, /chatid, staff commands
+                             (/ready, /cancel, /orders, /openshop, /closeshop),
+                             inline button callbacks (Mark Ready, Cancel),
+                             NotifyStaffNewOrder, NotifyCustomerPaid,
+                             notifyCustomerReady.
     summary.go               SendDailySalesSummary (cron 23:59 SGT),
                              DeleteStalePendingOrders (cron 00:00 SGT).
   webapp/
     server.go                HTTP mux, route registration, go:embed static files.
-    auth.go                   Telegram initData HMAC verification, signed session cookies.
-    handlers.go              /api/auth, /api/menu, /api/orders (create + list),
-                             /api/orders/{id} (status polling).
+    auth.go                  Telegram initData HMAC verification, signed session cookies.
+    handlers.go             /api/auth, /api/menu, /api/orders (create + list),
+                             /api/orders/pending (resume after reopen),
+                             /api/orders/{id} (status polling),
+                             /api/orders/test-pay/{id} (test mode only).
     stripe.go                Stripe webhook handler (payment_intent.succeeded/failed).
     static/
-      index.html             Single-page app (menu, cart, payment, success screens).
+      index.html             Single-page app (menu, cart, payment, success, error screens).
       styles.css             Telegram-themed (uses WebApp themeParams).
-      app.js                 State management, API calls, payment polling.
+      app.js                 State management, API calls, cart persistence (localStorage),
+                             pending order resume, payment polling, menu card steppers.
   payment/
-    stripe.go                CreatePayNowIntent, ConfirmPayNow, GetIntentStatus.
+    stripe.go                CreatePayNowIntent, ConfirmPayNow, GetIntentStatus, GetPayNowQR.
   storage/
-    db.go                    Open + migrations (customers, menu_items, orders, order_items).
+    db.go                    Open + migrations (customers, menu_items, orders, order_items, settings).
     customers.go             UpsertCustomer, CustomerByUserID.
     orders.go                CreateOrder, OrderByID, OrderByPaymentIntent, OrderByOrderNo,
-                             MarkPaid, SetStatus, SetPaymentIntent, OrdersByCustomer,
-                             DeleteStalePending, DaySalesSummary, DayOrderCount,
-                             PendingStaffOrders.
+                             PendingOrderByUser, MarkPaid, SetStatus, SetPaymentIntent,
+                             OrdersByCustomer, DeleteStalePending, DaySalesSummary,
+                             DayOrderCount, PendingStaffOrders.
     menu.go                  SeedMenuIfEmpty, LoadMenu, MenuItemBySKU.
+    settings.go              GetShopOpen, SetShopOpen, GetSetting, SetSetting.
   model/
     order.go                 Order, OrderItem structs + status constants.
     customer.go              Customer struct.
@@ -55,11 +63,14 @@ internal/
 docs/BACKEND.md, docs/references.md
 .env.example
 Dockerfile, docker-compose.yml, docker-compose.prod.yml
+.github/workflows/deploy.yml
 ```
 
 ## Data model
 
-All timestamps stored as RFC3339 strings in UTC.
+All timestamps stored as RFC3339 strings in UTC. Prices stored in cents
+(integer). The Web App displays `$X.XX` (cents/100). Stripe API receives
+cents. No float arithmetic in the backend.
 
 ### `customers`
 | column | type | notes |
@@ -116,10 +127,18 @@ Indexes: `idx_orders_customer(customer_id, created_at)`, `idx_orders_status`,
 
 Index: `idx_order_items_order(order_id)`.
 
+### `settings`
+| column | type | notes |
+|---|---|---|
+| key | TEXT PRIMARY KEY | e.g. "shop_open" |
+| value | TEXT NOT NULL | "1" (open) or "0" (closed) |
+
+Single key-value store. `shop_open` defaults to "1" (open) if absent.
+
 ## Order status lifecycle
 
 ```
-awaiting_payment  →  paid  →  preparing  →  ready  →  completed
+awaiting_payment  →  paid  →  ready
      ↓                ↓
   failed         cancelled
 ```
@@ -127,17 +146,32 @@ awaiting_payment  →  paid  →  preparing  →  ready  →  completed
 - **awaiting_payment**: order created at checkout, QR sent. Invisible to
   customer and staff. If never paid, stays here (cleaned up by 00:00 cron).
 - **paid**: Stripe webhook `payment_intent.succeeded` fires → `MarkPaid()`.
-  Staff group notified. Customer DMs confirmation.
-- **preparing**: staff acknowledges (future).
-- **ready**: staff `/ready <no>` → customer DMs "ready for pickup".
-- **completed**: staff `/done <no>`.
-- **cancelled**: staff `/cancel <no>` → customer DMs cancellation.
-- **failed**: Stripe webhook `payment_intent.payment_failed`.
+  Staff group notified with inline buttons. Customer DMs payment confirmation.
+- **ready**: staff tap "Mark Ready" button (or `/ready`) → customer DMs
+  itemized "ready for pickup" message.
+- **cancelled**: staff tap "Cancel" button (or `/cancel`) → customer DMs
+  cancellation.
+- **failed**: Stripe webhook `payment_intent.payment_failed`, or PaymentIntent
+  expired (detected on pending order resume).
+
+No "preparing" or "completed" status — the lifecycle is intentionally minimal.
+
+## Shop open/close
+
+Staff run `/openshop` or `/closeshop` in the staff group. The bot stores the
+state in the `settings` table (`shop_open` key).
+
+- When **closed**: `GET /api/menu` returns `shop_open: false`, `POST /api/orders`
+  returns `403 "shop is closed"`. The Web App shows a "Shop is currently closed"
+  screen.
+- When **open**: normal operation.
+- Default: open (if no `shop_open` row exists).
 
 ## Payment flow (PayNow via Stripe Direct API)
 
 ```
 1. Web App checkout → POST /api/orders
+   (backend checks shop is open)
 2. Backend creates order (status=awaiting_payment) in DB
 3. Backend calls Stripe: POST /v1/payment_intents
    (amount, currency=sgd, payment_method_types=["paynow"], metadata.order_id)
@@ -145,17 +179,61 @@ awaiting_payment  →  paid  →  preparing  →  ready  →  completed
    (payment_method_data.type=paynow)
 5. Stripe returns PaymentIntent with status=requires_action,
    next_action.paynow_display_qr_code.image_url_png
-6. Backend returns QR URL to the Web App
-7. Web App displays QR, polls GET /api/orders/{id} every 2s
-8. Customer scans QR with bank app (DBS/OCBC/UOB), pays
+6. Backend returns QR URL + test_mode flag to the Web App
+7. Web App displays QR (non-clickable), polls GET /api/orders/{id} every 2s
+8. Customer saves QR, scans with bank app (DBS/OCBC/UOB), pays
 9. Stripe fires payment_intent.succeeded webhook → POST /stripe/webhook
-10. Backend verifies signature, MarkPaid(), notifies staff
-11. Web App polling sees status=paid → shows success screen
+10. Backend verifies signature, MarkPaid(), notifies staff + customer
+11. Web App polling sees status=paid → shows success screen, clears cart
 ```
 
-Prices are stored in cents (integer). Menu prices in DB are in cents. The
-Web App displays `$X.XX` (cents/100). Stripe API receives cents. No float
-arithmetic in the backend.
+### Test mode
+
+When `STRIPE_SECRET_KEY` starts with `sk_test_`, the Web App shows a
+"[Test Mode] Simulate Payment Success" button on the QR screen. Tapping it
+calls `POST /api/orders/test-pay/{id}` which marks the order paid and
+triggers the same notifications as the real webhook. The endpoint returns
+`403` in production (live key).
+
+### Pending order resume
+
+If the user closes the Web App and reopens it while an order is
+`awaiting_payment`:
+1. Frontend calls `GET /api/orders/pending` on load.
+2. Backend finds the user's most recent `awaiting_payment` order.
+3. Backend re-fetches the QR URL from Stripe via `GetPayNowQR`.
+4. If the PaymentIntent is still `requires_action` → returns the order + QR.
+   Frontend jumps to the payment screen.
+5. If the PaymentIntent has expired → marks the order `failed`, returns null.
+   Frontend loads the menu fresh.
+
+### Cart persistence
+
+The cart is saved to `localStorage` on every change. On app load (when no
+pending order), the cart is restored. On successful payment, the cart is
+cleared.
+
+## Customer notifications (bot DMs)
+
+| Event | DM message |
+|---|---|
+| Payment confirmed | "Payment received! Order #X — pickup at HH:MM. We'll notify you when it's ready." |
+| Staff: Mark Ready | "Order #X is ready for pickup!" + itemized list + "Show #X at the counter." |
+| Staff: Cancel | "Order #X has been cancelled. Please expect a refund if you have paid." |
+
+## Staff order notifications (staff group)
+
+Each paid order sends a separate message with inline buttons:
+
+```
+🆕 #1 — @john, pickup: 15:45
+   2× Latte (Hot)
+   Total: $6.00
+[ Mark Ready ] [ Cancel ]
+```
+
+On tap, the message is edited to remove buttons and append the status
+("Ready" or "Cancelled"), and the customer is DM'd.
 
 ## HTTP listeners
 
@@ -163,11 +241,16 @@ arithmetic in the backend.
 |------|------|---------|
 | :8080 | /tg/{secret}/ | Telegram webhook (telebot) |
 | :8083 | / | Web App static files + API |
-| :8083 | /api/* | JSON API (auth, menu, orders) |
+| :8083 | /api/auth | Telegram initData verification |
+| :8083 | /api/menu | Menu items + shop_open status |
+| :8083 | /api/orders | Create order (POST), list orders (GET) |
+| :8083 | /api/orders/pending | Resume pending payment (GET) |
+| :8083 | /api/orders/test-pay/{id} | Simulate payment (test mode only) |
+| :8083 | /api/orders/{id} | Order status (polled by frontend) |
 | :8083 | /stripe/webhook | Stripe webhook |
 | :8081 | /health | Healthcheck |
 
-nginx routes `/tg/` → :8080, everything else → :8083.
+nginx routes `/tg/` → :8080, `/stripe/` → :8083, everything else → :8083.
 
 ## Authentication (Telegram Web App initData)
 
@@ -210,12 +293,16 @@ nginx routes `/tg/` → :8080, everything else → :8083.
 
 | Command | Action |
 |---|---|
-| `/ready <no>` | Mark order ready, DM customer "ready for pickup" |
-| `/done <no>` | Mark order completed |
+| `/ready <no>` | Mark order ready, DM customer with itemized details |
 | `/cancel <no>` | Mark order cancelled, DM customer |
-| `/orders` | List pending (paid/preparing) orders |
+| `/orders` | List pending (paid) orders |
+| `/openshop` | Open the shop — customers can order |
+| `/closeshop` | Close the shop — new orders disabled |
+| `/chatid` | Show the current chat's id (works in any chat) |
 
 Staff commands are ignored outside `STAFF_CHAT_ID` (guarded by `isStaffChat`).
+Inline buttons (`Mark Ready`, `Cancel`) are the primary staff interface; text
+commands are a fallback.
 
 ## Deployment
 
@@ -238,10 +325,22 @@ as cailorie, using the same pattern:
 ### Setup steps (one-time on the VM)
 
 1. Add DNS A record for `your-domain` → VM IP.
-2. Get Let's Encrypt cert:
-   `certbot certonly --webroot -w /var/www/certbot -d your-domain.example.com`
+2. Get Let's Encrypt cert (stop nginx first, use standalone mode):
+   ```
+   docker compose -f ~/fyp/backend/docker-compose.prod.yml stop nginx
+   sudo certbot certonly --standalone -d your-domain.example.com
+   docker compose -f ~/fyp/backend/docker-compose.prod.yml start nginx
+   ```
 3. `docker network connect shared caregiver-nginx` (if not already connected).
 4. Reload nginx: `docker compose -f ~/fyp/backend/docker-compose.prod.yml exec -T nginx nginx -s reload`
 5. `cp .env.example .env` and fill in secrets.
 6. In Stripe dashboard: add webhook endpoint `https://your-domain.example.com/stripe/webhook`.
 7. In BotFather: set webhook `https://your-domain.example.com/tg/<secret>/`.
+
+### Accessing the SQLite DB
+
+```bash
+docker exec -it coffee-bot sqlite3 /var/lib/coffee/data.db
+```
+
+(`sqlite3` is included in the Docker image via `apk add sqlite`.)

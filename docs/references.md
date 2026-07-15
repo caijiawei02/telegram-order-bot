@@ -11,6 +11,9 @@ External documentation consulted during the implementation of this project.
   `initData` HMAC verification in `internal/webapp/auth.go` follows the
   official validation scheme: `secret = HMAC_SHA256("WebAppData", bot_token)`,
   then `hash = HMAC_SHA256(secret, data_check_string)`.
+- **WebApp JS SDK**: https://telegram.org/js/telegram-web-app.js — used in
+  the frontend for `WebApp.ready()`, `WebApp.expand()`, `WebApp.initData`,
+  `WebApp.themeParams` (light/dark theming), `WebApp.close()`.
 
 ## Telegram Bot API — Payments (reference, not used)
 
@@ -26,9 +29,13 @@ External documentation consulted during the implementation of this project.
 - **URL**: https://pkg.go.dev/gopkg.in/telebot.v3
 - **Source**: https://github.com/go-telebot/telebot
 - **What was referenced**: `telebot.Webhook` poller, `telebot.WebApp` button
-  type, `ReplyMarkup`, `Chat` recipient, handler registration patterns.
+  type, `ReplyMarkup`, `Chat` recipient, `Bot.Edit` (editing messages to
+  remove inline buttons after action), `Bot.Respond` (acknowledging callback
+  queries), `ReplyMarkup.Data` (inline buttons with callback data), handler
+  registration patterns.
 - **How used**: Bot framework for the Telegram webhook (`:8080`), `/start`
-  handler with a WebApp button, and staff group commands.
+  handler with a WebApp button, staff group commands, and inline button
+  callbacks (`\f` prefix + unique callback id for routing).
 
 ## Stripe — PayNow
 
@@ -41,9 +48,11 @@ External documentation consulted during the implementation of this project.
   `next_action.paynow_display_qr_code.image_url_png`. Webhook event
   `payment_intent.succeeded` confirms payment.
 - **How used**: `internal/payment/stripe.go` implements
-  `CreatePayNowIntent`, `ConfirmPayNow` (extracts the QR URL), and
-  `GetIntentStatus` (polling fallback). `internal/webapp/stripe.go`
+  `CreatePayNowIntent`, `ConfirmPayNow` (extracts the QR URL),
+  `GetIntentStatus` (polling fallback), and `GetPayNowQR` (re-fetches the
+  live QR URL when resuming a pending order). `internal/webapp/stripe.go`
   handles the webhook via `webhook.ConstructEvent` for signature verification.
+  The `payment_intent.payment_failed` event marks orders as `failed`.
 
 ## Stripe Go SDK
 
@@ -62,7 +71,8 @@ External documentation consulted during the implementation of this project.
 - **What was referenced**: Pure-Go SQLite driver (no CGO), WAL mode, foreign
   keys, `ON DELETE CASCADE`.
 - **How used**: `internal/storage/db.go` opens the DB with WAL + busy_timeout
-  + foreign_keys pragmas. Migrations create 4 tables with indexes.
+  + foreign_keys pragmas. Migrations create 5 tables (customers, menu_items,
+  orders, order_items, settings) with indexes.
 
 ## godotenv
 
