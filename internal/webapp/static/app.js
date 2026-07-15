@@ -57,6 +57,10 @@
     show('screen-error');
   }
 
+  function showClosed() {
+    show('screen-closed');
+  }
+
   // --- Menu rendering ---
   function loadMenu() {
     api('GET', '/api/menu').then(function (resp) {
@@ -79,7 +83,7 @@
   }
 
   function showShopClosed() {
-    showError('Shop is currently closed. Please come back later.');
+    showClosed();
   }
 
   function renderCategories(cats) {
