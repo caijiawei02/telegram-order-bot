@@ -9,7 +9,7 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /coffee ./cmd/bot
 
 # --- Runtime stage ---
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates tzdata curl && \
+RUN apk add --no-cache ca-certificates tzdata curl sqlite && \
     adduser -D -h /var/lib/coffee coffee
 WORKDIR /var/lib/coffee
 COPY --from=builder /coffee /usr/local/bin/coffee
