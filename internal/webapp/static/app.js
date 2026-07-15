@@ -59,11 +59,15 @@
 
   // --- Menu rendering ---
   function loadMenu() {
-    api('GET', '/api/menu').then(function (items) {
-      menu = items;
+    api('GET', '/api/menu').then(function (resp) {
+      if (!resp.shop_open) {
+        showShopClosed();
+        return;
+      }
+      menu = resp.items;
       var cats = {};
-      for (var i = 0; i < items.length; i++) {
-        if (!cats[items[i].category]) cats[items[i].category] = true;
+      for (var i = 0; i < menu.length; i++) {
+        if (!cats[menu[i].category]) cats[menu[i].category] = true;
       }
       var catList = Object.keys(cats);
       activeCategory = catList[0] || '';
@@ -72,6 +76,10 @@
     }).catch(function (e) {
       showError('Failed to load menu');
     });
+  }
+
+  function showShopClosed() {
+    showError('Shop is currently closed. Please come back later.');
   }
 
   function renderCategories(cats) {

@@ -48,6 +48,8 @@ func (h *Handler) Register() {
 	h.bot.Handle("/ready", h.onReadyCmd)
 	h.bot.Handle("/cancel", h.onCancelCmd)
 	h.bot.Handle("/orders", h.onOrders)
+	h.bot.Handle("/openshop", h.onOpenShop)
+	h.bot.Handle("/closeshop", h.onCloseShop)
 	// Inline button callbacks (primary staff path).
 	h.bot.Handle("\f"+cbReady, h.onReadyBtn)
 	h.bot.Handle("\f"+cbCancel, h.onCancelBtn)
@@ -276,6 +278,26 @@ func (h *Handler) onOrders(c telebot.Context) error {
 		}
 	}
 	return c.Reply(sb.String())
+}
+
+func (h *Handler) onOpenShop(c telebot.Context) error {
+	if !h.isStaffChat(c) {
+		return nil
+	}
+	if err := storage.SetShopOpen(h.db, true); err != nil {
+		return c.Reply("Internal error, please try again.")
+	}
+	return c.Reply("\u2705 Shop is now OPEN. Customers can place orders.")
+}
+
+func (h *Handler) onCloseShop(c telebot.Context) error {
+	if !h.isStaffChat(c) {
+		return nil
+	}
+	if err := storage.SetShopOpen(h.db, false); err != nil {
+		return c.Reply("Internal error, please try again.")
+	}
+	return c.Reply("\U0001F6D1 Shop is now CLOSED. New orders are disabled.")
 }
 
 func parseOrderNo(c telebot.Context) (int, error) {

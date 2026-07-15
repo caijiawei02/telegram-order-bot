@@ -71,6 +71,11 @@ CREATE TABLE IF NOT EXISTS order_items (
 	quantity   INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
+
+CREATE TABLE IF NOT EXISTS settings (
+	key   TEXT PRIMARY KEY,
+	value TEXT NOT NULL
+);
 `)
 	if err != nil {
 		return fmt.Errorf("create tables: %w", err)

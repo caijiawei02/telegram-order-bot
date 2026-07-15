@@ -68,7 +68,11 @@ func (s *Server) handleMenu(w http.ResponseWriter, r *http.Request) {
 			Category: m.Category, PriceCents: m.PriceCents,
 		})
 	}
-	writeJSON(w, http.StatusOK, out)
+	shopOpen, _ := storage.GetShopOpen(s.deps.DB)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"shop_open": shopOpen,
+		"items":     out,
+	})
 }
 
 // --- create order ---
@@ -112,6 +116,12 @@ func (s *Server) handleOrders(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createOrder(w http.ResponseWriter, r *http.Request, user *SessionUser) {
+	// Guard: shop must be open to place orders.
+	shopOpen, _ := storage.GetShopOpen(s.deps.DB)
+	if !shopOpen {
+		writeError(w, http.StatusForbidden, "shop is closed")
+		return
+	}
 	var req createOrderReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad request")
