@@ -10,11 +10,11 @@
 <body>
   <!-- Menu Screen -->
   <div id="screen-menu" class="screen">
-    <h1>&#9749; Coffee Order</h1>
+    <h1>Coffee Order</h1>
     <div id="categories" class="categories"></div>
     <div id="menu-items" class="menu-grid"></div>
     <div id="cart-bar" class="cart-bar" onclick="showCart()">
-      <span>&#128722; Cart (<span id="cart-count">0</span>)</span>
+      <span>Cart (<span id="cart-count">0</span>)</span>
       <span id="cart-total">$0.00</span>
     </div>
   </div>
@@ -23,7 +23,7 @@
   <div id="screen-cart" class="screen hidden">
     <div class="header">
       <button class="back-btn" onclick="showMenu()">&larr;</button>
-      <h2>&#128722; Your Cart</h2>
+      <h2>Your Cart</h2>
     </div>
     <div id="cart-items"></div>
     <div class="total-row">
@@ -47,8 +47,9 @@
     <div class="qr-section">
       <img id="qr-image" src="" alt="PayNow QR Code">
     </div>
-    <p class="qr-hint">Scan with your bank app to pay</p>
-    <p class="qr-timer">&#9201; QR valid for 1 hour</p>
+    <p class="qr-hint">Save the QR, then scan it in your bank app to pay</p>
+    <button class="btn-secondary" onclick="saveQR()">Save QR to Gallery</button>
+    <p class="qr-timer">QR valid for 1 hour</p>
     <div id="payment-status" class="payment-status">
       <div class="spinner"></div>
       <p>Waiting for payment&hellip;</p>
@@ -57,17 +58,17 @@
 
   <!-- Success Screen -->
   <div id="screen-success" class="screen hidden">
-    <div class="success-icon">&#9989;</div>
+    <div class="success-icon">Done</div>
     <h2>Paid!</h2>
     <p id="success-order">Order #0</p>
-    <p id="success-detail">$0.00 &middot; Pickup: ASAP</p>
+    <p id="success-detail">$0.00 - Pickup: ASAP</p>
     <p class="pickup-instruction">Show your order number at the counter</p>
     <button class="btn-primary" onclick="Telegram.WebApp.close()">Close</button>
   </div>
 
   <!-- Error Screen -->
   <div id="screen-error" class="screen hidden">
-    <div class="error-icon">&#9888;</div>
+    <div class="error-icon">!</div>
     <h2>Something went wrong</h2>
     <p id="error-message"></p>
     <button class="btn-primary" onclick="showMenu()">Back to Menu</button>

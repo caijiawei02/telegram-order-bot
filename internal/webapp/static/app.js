@@ -220,15 +220,10 @@
   function showPaymentScreen(resp) {
     document.getElementById('payment-order-no').textContent = 'Order #' + resp.order_no;
     document.getElementById('payment-amount').textContent = fmt(resp.total_cents);
-    document.getElementById('payment-pickup').textContent = 'Pickup: ' + pickupLabel(selectedPickup);
+    document.getElementById('payment-pickup').textContent = 'Pickup: ' + (resp.pickup_time || 'ASAP');
     document.getElementById('qr-image').src = resp.qr_url;
     showPayment();
     startPolling(resp.order_id);
-  }
-
-  function pickupLabel(mins) {
-    if (mins === 0) return 'ASAP';
-    return mins + ' min';
   }
 
   // --- Polling for payment status ---
@@ -252,7 +247,7 @@
 
   function showSuccessScreen(o) {
     document.getElementById('success-order').textContent = 'Order #' + o.order_no;
-    document.getElementById('success-detail').textContent = fmt(o.total_cents) + ' \u00b7 Pickup: ' + pickupLabel(o.pickup_minutes);
+    document.getElementById('success-detail').textContent = fmt(o.total_cents) + ' - Pickup: ' + (o.pickup_time || 'ASAP');
     showSuccess();
   }
 
@@ -261,6 +256,19 @@
     var d = document.createElement('div');
     d.textContent = s;
     return d.innerHTML;
+  }
+
+  // --- Save QR to gallery ---
+  function saveQR() {
+    var img = document.getElementById('qr-image');
+    if (!img.src) return;
+    // Try to download the image so the user can save it.
+    var a = document.createElement('a');
+    a.href = img.src;
+    a.download = 'paynow-qr.png';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   }
 
   // --- Init ---
@@ -272,4 +280,5 @@
   window.showMenu = showMenu;
   window.showCart = showCart;
   window.placeOrder = placeOrder;
+  window.saveQR = saveQR;
 })();

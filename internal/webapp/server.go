@@ -6,6 +6,7 @@ import (
 	"embed"
 	"io/fs"
 	"net/http"
+	"time"
 )
 
 //go:embed static/*
@@ -13,13 +14,14 @@ var staticFS embed.FS
 
 // Deps holds the dependencies injected from main.
 type Deps struct {
-	DB                 *sql.DB
-	BotToken           string
-	SessionSecret      string
-	StripeSecret       string
+	DB                  *sql.DB
+	BotToken            string
+	SessionSecret       string
+	StripeSecret        string
 	StripeWebhookSecret string
-	StaffChatID        int64
-	Currency           string
+	StaffChatID         int64
+	Currency            string
+	SGT                 *time.Location
 }
 
 // Server is the HTTP server for the web app, API, Stripe webhook, and health.

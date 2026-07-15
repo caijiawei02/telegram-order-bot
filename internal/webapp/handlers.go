@@ -80,11 +80,12 @@ type createOrderItem struct {
 }
 
 type createOrderResp struct {
-	OrderID      int64  `json:"order_id"`
-	OrderNo      int    `json:"order_no"`
-	TotalCents   int    `json:"total_cents"`
-	QRImageURL   string `json:"qr_url"`
+	OrderID         int64  `json:"order_id"`
+	OrderNo         int    `json:"order_no"`
+	TotalCents      int    `json:"total_cents"`
+	QRImageURL      string `json:"qr_url"`
 	PaymentIntentID string `json:"payment_intent_id"`
+	PickupTime      string `json:"pickup_time"`
 }
 
 func (s *Server) handleOrders(w http.ResponseWriter, r *http.Request) {
@@ -172,6 +173,7 @@ func (s *Server) createOrder(w http.ResponseWriter, r *http.Request, user *Sessi
 	}
 
 	// Create the order (status=awaiting_payment, no payment intent yet).
+	createdAt := time.Now().UTC()
 	orderID, err := storage.CreateOrder(s.deps.DB, model.Order{
 		OrderNo:       orderNo,
 		CustomerID:    custID,
@@ -180,7 +182,7 @@ func (s *Server) createOrder(w http.ResponseWriter, r *http.Request, user *Sessi
 		TotalCents:    totalCents,
 		PickupMinutes: req.PickupMinutes,
 		Note:          req.Note,
-		CreatedAt:     time.Now().UTC(),
+		CreatedAt:     createdAt,
 	}, orderItems)
 	if err != nil {
 		fmt.Printf("create order: %v\n", err)
@@ -211,6 +213,7 @@ func (s *Server) createOrder(w http.ResponseWriter, r *http.Request, user *Sessi
 		TotalCents:      totalCents,
 		QRImageURL:      result.QRImageURL,
 		PaymentIntentID: piID,
+		PickupTime:      pickupLabel(req.PickupMinutes, createdAt, s.deps.SGT),
 	})
 }
 
@@ -258,6 +261,7 @@ type orderStatusResp struct {
 	Status          string `json:"status"`
 	TotalCents      int    `json:"total_cents"`
 	PickupMinutes   int    `json:"pickup_minutes"`
+	PickupTime      string `json:"pickup_time"`
 	PaymentIntentID string `json:"payment_intent_id"`
 }
 
@@ -312,6 +316,7 @@ func (s *Server) handleOrderStatus(w http.ResponseWriter, r *http.Request) {
 		Status:          order.Status,
 		TotalCents:      order.TotalCents,
 		PickupMinutes:   order.PickupMinutes,
+		PickupTime:      pickupLabel(order.PickupMinutes, order.CreatedAt, s.deps.SGT),
 		PaymentIntentID: order.StripePaymentIntent,
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -327,4 +332,13 @@ func downloadQR(url string) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 	return io.ReadAll(resp.Body)
+}
+
+// pickupLabel returns "ASAP" for 0 minutes, or the exact pickup clock time
+// in the given timezone (24-hour format, e.g. "15:45").
+func pickupLabel(mins int, base time.Time, loc *time.Location) string {
+	if mins == 0 {
+		return "ASAP"
+	}
+	return base.In(loc).Add(time.Duration(mins) * time.Minute).Format("15:04")
 }

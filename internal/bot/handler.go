@@ -193,7 +193,13 @@ func (h *Handler) onOrders(c telebot.Context) error {
 		if o.Status == model.StatusReady {
 			statusEmoji = "\u2705"
 		}
-		sb.WriteString(fmt.Sprintf("%s #%d \u2014 $%.2f \u2014 %s\n", statusEmoji, o.OrderNo, float64(o.TotalCents)/100, pickupLabel(o.PickupMinutes)))
+		base := o.PaidAt
+		if base.IsZero() {
+			base = o.CreatedAt
+		}
+		customer, _ := storage.CustomerByUserID(h.db, o.UserID)
+		who := displayName(customer)
+		sb.WriteString(fmt.Sprintf("%s #%d \u2014 %s \u2014 $%.2f \u2014 %s\n", statusEmoji, o.OrderNo, who, float64(o.TotalCents)/100, pickupLabel(o.PickupMinutes, base, h.sgt)))
 		for _, it := range items {
 			sb.WriteString(fmt.Sprintf("   %d\u00D7 %s\n", it.Quantity, it.Name))
 		}
@@ -209,11 +215,11 @@ func parseOrderNo(c telebot.Context) (int, error) {
 	return strconv.Atoi(strings.TrimSpace(args[0]))
 }
 
-func pickupLabel(mins int) string {
+func pickupLabel(mins int, base time.Time, loc *time.Location) string {
 	if mins == 0 {
 		return "ASAP"
 	}
-	return fmt.Sprintf("%d min", mins)
+	return base.In(loc).Add(time.Duration(mins) * time.Minute).Format("15:04")
 }
 
 // NotifyStaffNewOrder sends a new paid order notification to the staff group.
@@ -225,13 +231,33 @@ func (h *Handler) NotifyStaffNewOrder(orderID int64) {
 		return
 	}
 	items, _ := storage.OrderItems(h.db, orderID)
+	customer, _ := storage.CustomerByUserID(h.db, order.UserID)
+	who := displayName(customer)
+	base := order.PaidAt
+	if base.IsZero() {
+		base = order.CreatedAt
+	}
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("\U0001F195 #%d \u2014 %s, pickup: %s\n", order.OrderNo, orderStatusEmoji(order.Status), pickupLabel(order.PickupMinutes)))
+	sb.WriteString(fmt.Sprintf("\U0001F195 #%d \u2014 %s, pickup: %s\n", order.OrderNo, who, pickupLabel(order.PickupMinutes, base, h.sgt)))
 	for _, it := range items {
 		sb.WriteString(fmt.Sprintf("   %d\u00D7 %s\n", it.Quantity, it.Name))
 	}
 	sb.WriteString(fmt.Sprintf("   Total: $%.2f", float64(order.TotalCents)/100))
 	h.bot.Send(&telebot.Chat{ID: h.staffChatID}, sb.String())
+}
+
+// displayName returns @username, or first name, or "User <id>" as fallback.
+func displayName(c *model.Customer) string {
+	if c == nil {
+		return "Unknown"
+	}
+	if c.Username != "" {
+		return "@" + c.Username
+	}
+	if c.FirstName != "" {
+		return c.FirstName
+	}
+	return fmt.Sprintf("User %d", c.UserID)
 }
 
 func orderStatusEmoji(s string) string {

@@ -134,6 +134,7 @@ func main() {
 		StripeWebhookSecret: stripeWebhookSecret,
 		StaffChatID:         staffChatID,
 		Currency:            "SGD",
+		SGT:                 loc,
 	})
 
 	// Register the Stripe webhook handler on the web app mux.
