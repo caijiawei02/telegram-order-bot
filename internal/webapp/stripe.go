@@ -1,7 +1,6 @@
 package webapp
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,9 +13,9 @@ import (
 )
 
 // StripeWebhookHandler returns an http.HandlerFunc that processes Stripe
-// webhook events. It verifies the signature, handles
+// webhook events. It verifies the signature and handles
 // payment_intent.succeeded and payment_intent.payment_failed.
-func (s *Server) StripeWebhookHandler(notifyStaff func(orderID int64), notifyCustomer func(orderID int64)) http.HandlerFunc {
+func (s *Server) StripeWebhookHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		const maxBody = 1 << 20 // 1 MiB
 		body, err := io.ReadAll(io.LimitReader(r.Body, maxBody))
@@ -38,19 +37,18 @@ func (s *Server) StripeWebhookHandler(notifyStaff func(orderID int64), notifyCus
 			return
 		}
 
-	switch event.Type {
-	case "payment_intent.succeeded":
-		s.handlePaymentSucceeded(w, r, event, notifyStaff, notifyCustomer)
+		switch event.Type {
+		case "payment_intent.succeeded":
+			s.handlePaymentSucceeded(w, r, event)
 		case "payment_intent.payment_failed":
 			s.handlePaymentFailed(w, r, event)
 		default:
-			// Acknowledge unhandled events quickly.
 			w.WriteHeader(http.StatusOK)
 		}
 	}
 }
 
-func (s *Server) handlePaymentSucceeded(w http.ResponseWriter, r *http.Request, event stripe.Event, notifyStaff func(int64), notifyCustomer func(int64)) {
+func (s *Server) handlePaymentSucceeded(w http.ResponseWriter, r *http.Request, event stripe.Event) {
 	var pi stripe.PaymentIntent
 	if err := json.Unmarshal(event.Data.Raw, &pi); err != nil {
 		fmt.Printf("unmarshal payment_intent.succeeded: %v\n", err)
@@ -81,11 +79,11 @@ func (s *Server) handlePaymentSucceeded(w http.ResponseWriter, r *http.Request, 
 	}
 
 	// Notify staff + customer in the background (best effort).
-	if notifyStaff != nil {
-		go notifyStaff(order.ID)
+	if s.deps.NotifyStaff != nil {
+		go s.deps.NotifyStaff(order.ID)
 	}
-	if notifyCustomer != nil {
-		go notifyCustomer(order.ID)
+	if s.deps.NotifyCustomer != nil {
+		go s.deps.NotifyCustomer(order.ID)
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -105,24 +103,6 @@ func (s *Server) handlePaymentFailed(w http.ResponseWriter, r *http.Request, eve
 		return
 	}
 
-	// Mark as failed so it doesn't linger in awaiting_payment forever.
 	_ = storage.SetStatus(s.deps.DB, order.ID, model.StatusFailed)
 	w.WriteHeader(http.StatusOK)
-}
-
-// verifyStripeRequest is a small helper used internally for testing.
-func verifyStripeRequest(body []byte, sig, secret string) error {
-	_, err := webhook.ConstructEvent(body, sig, secret)
-	return err
-}
-
-// bufferBody reads an http.Request body into a buffer and restores it so
-// downstream handlers can re-read it. (Not currently used but kept for
-// potential future middleware needs.)
-func bufferBody(r *http.Request) {
-	if r.Body == nil {
-		return
-	}
-	body, _ := io.ReadAll(r.Body)
-	r.Body = io.NopCloser(bytes.NewReader(body))
 }

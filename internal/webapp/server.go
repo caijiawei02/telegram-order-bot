@@ -22,6 +22,8 @@ type Deps struct {
 	StaffChatID         int64
 	Currency            string
 	SGT                 *time.Location
+	NotifyStaff         func(orderID int64)
+	NotifyCustomer      func(orderID int64)
 }
 
 // Server is the HTTP server for the web app, API, Stripe webhook, and health.
@@ -57,7 +59,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/auth", s.handleAuth)
 	s.mux.HandleFunc("/api/menu", s.handleMenu)
 	s.mux.HandleFunc("/api/orders", s.handleOrders)
-	s.mux.HandleFunc("/api/orders/", s.handleOrderStatus) // /api/orders/{id}
+	s.mux.HandleFunc("/api/orders/test-pay/", s.handleTestPay) // POST, before /api/orders/
+	s.mux.HandleFunc("/api/orders/", s.handleOrderStatus)      // /api/orders/{id}
 
 	// Health.
 	s.mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {

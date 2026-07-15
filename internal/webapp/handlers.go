@@ -14,6 +14,11 @@ import (
 	"github.com/caijiawei02/telegram-order-bot/internal/storage"
 )
 
+// isTestMode reports whether the bot is running with a Stripe test key.
+func (s *Server) isTestMode() bool {
+	return strings.HasPrefix(s.deps.StripeSecret, "sk_test_")
+}
+
 // --- shared helpers ---
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
@@ -86,6 +91,7 @@ type createOrderResp struct {
 	QRImageURL      string `json:"qr_url"`
 	PaymentIntentID string `json:"payment_intent_id"`
 	PickupTime      string `json:"pickup_time"`
+	TestMode        bool   `json:"test_mode"`
 }
 
 func (s *Server) handleOrders(w http.ResponseWriter, r *http.Request) {
@@ -214,6 +220,7 @@ func (s *Server) createOrder(w http.ResponseWriter, r *http.Request, user *Sessi
 		QRImageURL:      result.QRImageURL,
 		PaymentIntentID: piID,
 		PickupTime:      pickupLabel(req.PickupMinutes, createdAt, s.deps.SGT),
+		TestMode:        s.isTestMode(),
 	})
 }
 
@@ -341,4 +348,63 @@ func pickupLabel(mins int, base time.Time, loc *time.Location) string {
 		return "ASAP"
 	}
 	return base.In(loc).Add(time.Duration(mins) * time.Minute).Format("15:04")
+}
+
+// handleTestPay simulates a successful PayNow payment for test mode. Only
+// works when STRIPE_SECRET_KEY starts with "sk_test_". Marks the order paid
+// and triggers staff + customer notifications, just like the real webhook.
+func (s *Server) handleTestPay(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !s.isTestMode() {
+		writeError(w, http.StatusForbidden, "test mode only")
+		return
+	}
+	user := s.requireAuth(r)
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	// Extract order id from path: /api/orders/test-pay/{id}
+	path := strings.TrimPrefix(r.URL.Path, "/api/orders/test-pay/")
+	if path == "" {
+		writeError(w, http.StatusBadRequest, "missing order id")
+		return
+	}
+	orderID, err := strconv.ParseInt(path, 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid order id")
+		return
+	}
+
+	order, err := storage.OrderByID(s.deps.DB, orderID)
+	if err != nil || order == nil {
+		writeError(w, http.StatusNotFound, "order not found")
+		return
+	}
+	if order.UserID != user.UserID {
+		writeError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	if order.Status != model.StatusAwaitingPayment {
+		writeError(w, http.StatusBadRequest, "order is "+order.Status)
+		return
+	}
+
+	if err := storage.MarkPaid(s.deps.DB, order.ID, "test_charge"); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	// Trigger the same notifications as the real Stripe webhook.
+	if s.deps.NotifyStaff != nil {
+		go s.deps.NotifyStaff(order.ID)
+	}
+	if s.deps.NotifyCustomer != nil {
+		go s.deps.NotifyCustomer(order.ID)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "paid"})
 }

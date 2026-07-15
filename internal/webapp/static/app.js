@@ -10,6 +10,7 @@
   var activeCategory = '';
   var selectedPickup = 0;
   var pollTimer = null;
+  var currentOrderID = null;
 
   // --- API helpers ---
   function api(method, path, body) {
@@ -218,10 +219,18 @@
   }
 
   function showPaymentScreen(resp) {
+    currentOrderID = resp.order_id;
     document.getElementById('payment-order-no').textContent = 'Order #' + resp.order_no;
     document.getElementById('payment-amount').textContent = fmt(resp.total_cents);
     document.getElementById('payment-pickup').textContent = 'Pickup: ' + (resp.pickup_time || 'ASAP');
     document.getElementById('qr-image').src = resp.qr_url;
+    // Show test-pay button only in test mode.
+    var testBtn = document.getElementById('test-pay-btn');
+    if (resp.test_mode) {
+      testBtn.classList.remove('hidden');
+    } else {
+      testBtn.classList.add('hidden');
+    }
     showPayment();
     startPolling(resp.order_id);
   }
@@ -271,6 +280,21 @@
     document.body.removeChild(a);
   }
 
+  // --- Test mode: simulate payment success ---
+  function simulatePayment() {
+    if (!currentOrderID) return;
+    var btn = document.getElementById('test-pay-btn');
+    btn.disabled = true;
+    btn.textContent = 'Simulating...';
+    api('POST', '/api/orders/test-pay/' + currentOrderID, {}).then(function () {
+      // Polling will pick up status=paid and show the success screen.
+    }).catch(function (e) {
+      btn.disabled = false;
+      btn.textContent = '[Test Mode] Simulate Payment Success';
+      showError(e.message);
+    });
+  }
+
   // --- Init ---
   authenticate().then(function () {
     loadMenu();
@@ -281,4 +305,5 @@
   window.showCart = showCart;
   window.placeOrder = placeOrder;
   window.saveQR = saveQR;
+  window.simulatePayment = simulatePayment;
 })();
