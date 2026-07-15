@@ -119,7 +119,8 @@ func PendingOrderByUser(db *sql.DB, userID int64) (*model.Order, error) {
 
 func scanOrder(row *sql.Row) (*model.Order, error) {
 	var o model.Order
-	var createdStr, paidStr string
+	var createdStr string
+	var paidStr sql.NullString
 	if err := row.Scan(
 		&o.ID, &o.OrderNo, &o.CustomerID, &o.UserID, &o.ChatID, &o.Status, &o.TotalCents,
 		&o.PickupMinutes, &o.Note, &o.StripePaymentIntent, &o.StripeChargeID,
@@ -131,8 +132,8 @@ func scanOrder(row *sql.Row) (*model.Order, error) {
 		return nil, err
 	}
 	o.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
-	if paidStr != "" {
-		o.PaidAt, _ = time.Parse(time.RFC3339, paidStr)
+	if paidStr.Valid {
+		o.PaidAt, _ = time.Parse(time.RFC3339, paidStr.String)
 	}
 	return &o, nil
 }
@@ -309,7 +310,8 @@ func scanOrders(rows *sql.Rows) ([]model.Order, error) {
 	var out []model.Order
 	for rows.Next() {
 		var o model.Order
-		var createdStr, paidStr string
+		var createdStr string
+		var paidStr sql.NullString
 		if err := rows.Scan(
 			&o.ID, &o.OrderNo, &o.CustomerID, &o.UserID, &o.ChatID, &o.Status, &o.TotalCents,
 			&o.PickupMinutes, &o.Note, &o.StripePaymentIntent, &o.StripeChargeID,
@@ -318,8 +320,8 @@ func scanOrders(rows *sql.Rows) ([]model.Order, error) {
 			return nil, err
 		}
 		o.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
-		if paidStr != "" {
-			o.PaidAt, _ = time.Parse(time.RFC3339, paidStr)
+		if paidStr.Valid {
+			o.PaidAt, _ = time.Parse(time.RFC3339, paidStr.String)
 		}
 		out = append(out, o)
 	}

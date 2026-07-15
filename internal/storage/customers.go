@@ -9,10 +9,11 @@ import (
 )
 
 // UpsertCustomer inserts or updates a customer row keyed by Telegram user_id.
-// Returns the customer's internal DB id.
+// Returns the customer's internal DB id. Always SELECTs the id after the
+// upsert (LastInsertId is unreliable with ON CONFLICT in modernc.org/sqlite).
 func UpsertCustomer(db *sql.DB, userID int64, username, firstName string) (int64, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
-	res, err := db.Exec(
+	_, err := db.Exec(
 		`INSERT INTO customers (user_id, username, first_name, last_seen_at)
 		 VALUES (?, ?, ?, ?)
 		 ON CONFLICT(user_id) DO UPDATE SET
@@ -24,13 +25,10 @@ func UpsertCustomer(db *sql.DB, userID int64, username, firstName string) (int64
 	if err != nil {
 		return 0, fmt.Errorf("upsert customer: %w", err)
 	}
-	id, _ := res.LastInsertId()
-	if id == 0 {
-		// ON CONFLICT update path: fetch the existing id.
-		err = db.QueryRow(`SELECT id FROM customers WHERE user_id = ?`, userID).Scan(&id)
-		if err != nil {
-			return 0, fmt.Errorf("fetch customer id: %w", err)
-		}
+	var id int64
+	err = db.QueryRow(`SELECT id FROM customers WHERE user_id = ?`, userID).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("fetch customer id: %w", err)
 	}
 	return id, nil
 }

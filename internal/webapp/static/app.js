@@ -309,19 +309,6 @@
     return d.innerHTML;
   }
 
-  // --- Save QR to gallery ---
-  function saveQR() {
-    var img = document.getElementById('qr-image');
-    if (!img.src) return;
-    // Try to download the image so the user can save it.
-    var a = document.createElement('a');
-    a.href = img.src;
-    a.download = 'paynow-qr.png';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  }
-
   // --- Test mode: simulate payment success ---
   function simulatePayment() {
     if (!currentOrderID) return;
@@ -362,6 +349,5 @@
   window.showMenu = showMenu;
   window.showCart = showCart;
   window.placeOrder = placeOrder;
-  window.saveQR = saveQR;
   window.simulatePayment = simulatePayment;
 })();

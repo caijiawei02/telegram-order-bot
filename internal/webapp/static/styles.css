@@ -312,20 +312,6 @@ h2 {
   to { transform: rotate(360deg); }
 }
 
-/* Save QR button */
-.btn-secondary {
-  width: 100%;
-  padding: 12px;
-  border: 2px solid var(--tg-theme-button-color, #3390ec);
-  border-radius: 12px;
-  background: transparent;
-  color: var(--tg-theme-button-color, #3390ec);
-  font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
-  margin-bottom: 8px;
-}
-
 /* Success */
 #screen-success {
   text-align: center;
