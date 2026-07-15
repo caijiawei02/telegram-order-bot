@@ -16,7 +16,7 @@ import (
 // StripeWebhookHandler returns an http.HandlerFunc that processes Stripe
 // webhook events. It verifies the signature, handles
 // payment_intent.succeeded and payment_intent.payment_failed.
-func (s *Server) StripeWebhookHandler(notifyStaff func(orderID int64)) http.HandlerFunc {
+func (s *Server) StripeWebhookHandler(notifyStaff func(orderID int64), notifyCustomer func(orderID int64)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		const maxBody = 1 << 20 // 1 MiB
 		body, err := io.ReadAll(io.LimitReader(r.Body, maxBody))
@@ -38,9 +38,9 @@ func (s *Server) StripeWebhookHandler(notifyStaff func(orderID int64)) http.Hand
 			return
 		}
 
-		switch event.Type {
-		case "payment_intent.succeeded":
-			s.handlePaymentSucceeded(w, r, event, notifyStaff)
+	switch event.Type {
+	case "payment_intent.succeeded":
+		s.handlePaymentSucceeded(w, r, event, notifyStaff, notifyCustomer)
 		case "payment_intent.payment_failed":
 			s.handlePaymentFailed(w, r, event)
 		default:
@@ -50,7 +50,7 @@ func (s *Server) StripeWebhookHandler(notifyStaff func(orderID int64)) http.Hand
 	}
 }
 
-func (s *Server) handlePaymentSucceeded(w http.ResponseWriter, r *http.Request, event stripe.Event, notifyStaff func(int64)) {
+func (s *Server) handlePaymentSucceeded(w http.ResponseWriter, r *http.Request, event stripe.Event, notifyStaff func(int64), notifyCustomer func(int64)) {
 	var pi stripe.PaymentIntent
 	if err := json.Unmarshal(event.Data.Raw, &pi); err != nil {
 		fmt.Printf("unmarshal payment_intent.succeeded: %v\n", err)
@@ -80,9 +80,12 @@ func (s *Server) handlePaymentSucceeded(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	// Notify staff in the background (best effort).
+	// Notify staff + customer in the background (best effort).
 	if notifyStaff != nil {
 		go notifyStaff(order.ID)
+	}
+	if notifyCustomer != nil {
+		go notifyCustomer(order.ID)
 	}
 
 	w.WriteHeader(http.StatusOK)

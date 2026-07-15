@@ -237,7 +237,7 @@
         return;
       }
       api('GET', '/api/orders/' + orderID).then(function (o) {
-        if (o.status === 'paid' || o.status === 'preparing' || o.status === 'ready' || o.status === 'completed') {
+        if (o.status === 'paid' || o.status === 'ready') {
           clearInterval(pollTimer);
           showSuccessScreen(o);
         }

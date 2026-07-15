@@ -6,9 +6,7 @@ import "time"
 const (
 	StatusAwaitingPayment = "awaiting_payment"
 	StatusPaid             = "paid"
-	StatusPreparing        = "preparing"
 	StatusReady            = "ready"
-	StatusCompleted        = "completed"
 	StatusCancelled        = "cancelled"
 	StatusFailed           = "failed"
 )
@@ -41,10 +39,10 @@ type OrderItem struct {
 }
 
 // HasGoneThrough reports whether the order successfully transitioned to paid
-// or beyond (excluding cancelled/failed/awaiting_payment).
+// or ready (excluding cancelled/failed/awaiting_payment).
 func (o Order) HasGoneThrough() bool {
 	switch o.Status {
-	case StatusPaid, StatusPreparing, StatusReady, StatusCompleted:
+	case StatusPaid, StatusReady:
 		return true
 	default:
 		return false

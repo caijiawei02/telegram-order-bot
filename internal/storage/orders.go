@@ -191,7 +191,7 @@ func OrdersByCustomer(db *sql.DB, customerID int64, limit int) ([]model.Order, e
 		        created_at, paid_at
 		 FROM orders
 		 WHERE customer_id = ?
-		   AND status IN ('paid','preparing','ready','completed')
+		   AND status IN ('paid','ready')
 		 ORDER BY created_at DESC
 		 LIMIT ?`,
 		customerID, limit,
@@ -235,7 +235,7 @@ func DaySalesSummary(db *sql.DB, dayStart, dayEnd time.Time) ([]SalesRow, error)
 		`SELECT oi.name, SUM(oi.quantity), oi.unit_cents, SUM(oi.quantity * oi.unit_cents)
 		 FROM order_items oi
 		 JOIN orders o ON o.id = oi.order_id
-		 WHERE o.status IN ('paid','preparing','ready','completed')
+		 WHERE o.status IN ('paid','ready')
 		   AND o.paid_at >= ? AND o.paid_at < ?
 		 GROUP BY oi.name, oi.unit_cents
 		 ORDER BY SUM(oi.quantity) DESC`,
@@ -262,7 +262,7 @@ func DayOrderCount(db *sql.DB, dayStart, dayEnd time.Time) (int, error) {
 	var n int
 	err := db.QueryRow(
 		`SELECT COUNT(*) FROM orders
-		 WHERE status IN ('paid','preparing','ready','completed')
+		 WHERE status IN ('paid','ready')
 		   AND paid_at >= ? AND paid_at < ?`,
 		dayStart.UTC().Format(time.RFC3339),
 		dayEnd.UTC().Format(time.RFC3339),
@@ -270,15 +270,15 @@ func DayOrderCount(db *sql.DB, dayStart, dayEnd time.Time) (int, error) {
 	return n, err
 }
 
-// PendingStaffOrders returns orders that are paid or preparing (i.e. need
-// staff attention), ordered by paid_at ASC. Used by /orders staff command.
+// PendingStaffOrders returns orders that are paid but not yet ready (i.e.
+// need staff attention), ordered by paid_at ASC. Used by /orders staff command.
 func PendingStaffOrders(db *sql.DB) ([]model.Order, error) {
 	rows, err := db.Query(
 		`SELECT id, order_no, customer_id, user_id, chat_id, status, total_cents,
 		        pickup_minutes, note, stripe_payment_intent, stripe_charge_id,
 		        created_at, paid_at
 		 FROM orders
-		 WHERE status IN ('paid','preparing')
+		 WHERE status = 'paid'
 		 ORDER BY paid_at ASC
 		 LIMIT 50`,
 	)

@@ -139,9 +139,10 @@ func main() {
 
 	// Register the Stripe webhook handler on the web app mux.
 	webAppMux := http.NewServeMux()
-	webAppMux.Handle(stripeWebhookPath, webAppServer.StripeWebhookHandler(func(orderID int64) {
-		h.NotifyStaffNewOrder(orderID)
-	}))
+	webAppMux.Handle(stripeWebhookPath, webAppServer.StripeWebhookHandler(
+		func(orderID int64) { h.NotifyStaffNewOrder(orderID) },
+		func(orderID int64) { h.NotifyCustomerPaid(orderID) },
+	))
 	// Everything else goes to the web app server.
 	webAppMux.Handle("/", webAppServer)
 
