@@ -323,31 +323,31 @@ as cailorie, using the same pattern:
 
 - **Docker Compose** (`docker-compose.prod.yml`): builds the Go binary, runs
   it as a container named `coffee-bot`, joins the external `shared` Docker
-  network so fyp's nginx can reach it.
-- **nginx** (`~/fyp/backend/nginx.conf` on the VM): terminates TLS (Let's
+  network so the edge nginx (in `~/server-stuff`) can reach it.
+- **nginx** (`~/server-stuff/nginx.conf` on the VM): terminates TLS (Let's
   Encrypt), routes by Host header:
   - `/tg/` → `coffee-bot:8080` (Telegram webhook)
   - `/stripe/` → `coffee-bot:8083` (Stripe webhook)
   - `/` → `coffee-bot:8083` (Web App + API)
   - `/health` → `coffee-bot:8081` (healthcheck)
 - **GitHub Actions** (`.github/workflows/deploy.yml`): on push to main, SSH
-  to the VM, pull latest, `docker compose up --build`, reload fyp's nginx.
-  Requires GitHub secrets `OCI_VM_IP` and `OCI_SSH_PRIVATE_KEY`.
+  to the VM, pull latest, `docker compose up --build`, reload the edge nginx
+  in `~/server-stuff`. Requires GitHub secrets `OCI_VM_IP` and
+  `OCI_SSH_PRIVATE_KEY`.
 
 ### Setup steps (one-time on the VM)
 
 1. Add DNS A record for `your-domain` → VM IP.
-2. Get Let's Encrypt cert (stop nginx first, use standalone mode):
+2. Get Let's Encrypt cert (webroot mode, no need to stop nginx):
    ```
-   docker compose -f ~/fyp/backend/docker-compose.prod.yml stop nginx
-   sudo certbot certonly --standalone -d your-domain.example.com
-   docker compose -f ~/fyp/backend/docker-compose.prod.yml start nginx
+   # Ensure edge nginx is up to serve the ACME challenge:
+   cd ~/server-stuff && docker compose up -d
+   sudo certbot certonly --webroot -w /var/www/certbot -d your-domain.example.com
+   docker compose -f ~/server-stuff/docker-compose.yml exec -T nginx nginx -s reload
    ```
-3. `docker network connect shared caregiver-nginx` (if not already connected).
-4. Reload nginx: `docker compose -f ~/fyp/backend/docker-compose.prod.yml exec -T nginx nginx -s reload`
-5. `cp .env.example .env` and fill in secrets.
-6. In Stripe dashboard: add webhook endpoint `https://your-domain.example.com/stripe/webhook`.
-7. In BotFather: set webhook `https://your-domain.example.com/tg/<secret>/`.
+3. `cp .env.example .env` and fill in secrets.
+4. In Stripe dashboard: add webhook endpoint `https://your-domain.example.com/stripe/webhook`.
+5. In BotFather: set webhook `https://your-domain.example.com/tg/<secret>/`.
 
 ### Accessing the SQLite DB
 
