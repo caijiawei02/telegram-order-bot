@@ -248,6 +248,24 @@ h2 {
   cursor: not-allowed;
 }
 
+.btn-secondary {
+  width: 100%;
+  padding: 12px;
+  border: 2px solid var(--tg-theme-button-color, #3390ec);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--tg-theme-button-color, #3390ec);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 12px;
+}
+
+.btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Payment screen */
 .payment-info {
   text-align: center;
