@@ -337,7 +337,7 @@ as cailorie, using the same pattern:
 
 ### Setup steps (one-time on the VM)
 
-1. Add DNS A record for `your-domain` → VM IP.
+1. Add DNS A record for your domain → VM IP.
 2. Get Let's Encrypt cert (webroot mode, no need to stop nginx):
    ```
    # Ensure edge nginx is up to serve the ACME challenge:
