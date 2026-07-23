@@ -323,7 +323,7 @@
       // Polling will pick up status=paid and show the success screen.
     }).catch(function (e) {
       btn.disabled = false;
-      btn.textContent = '[Test Mode] Simulate Payment Success';
+      btn.textContent = 'Simulate Payment';
       showError(e.message);
     });
   }
