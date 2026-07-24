@@ -9,8 +9,43 @@ concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
 jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+      - name: Ensure package is public
+        run: |
+          gh api -X PATCH /user/packages/container/${{ github.event.repository.name }}/visibility \
+            -f visibility=public
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   deploy:
+    needs: build-and-push
     runs-on: ubuntu-latest
 
     steps:
@@ -21,53 +56,36 @@ jobs:
           username: ubuntu
           key: ${{ secrets.OCI_SSH_PRIVATE_KEY }}
           script_stop: true
-          command_timeout: 30m
+          command_timeout: 5m
           script: |
             set -euo pipefail
             export PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
 
             echo "=== Environment ==="
             docker --version
-            git --version
 
-            # ── Clone or pull latest code ──
-            REPO_EXISTS=no
-            { [ -d "$HOME/telegram-order-bot/.git" ] && REPO_EXISTS=yes; } || true
-            if [ "$REPO_EXISTS" = "yes" ]; then
-              echo "Existing repo found, pulling latest..."
-              cd "$HOME/telegram-order-bot"
-              git fetch origin main
-              git reset --hard origin/main
-              echo "Pulled latest: $(git log --oneline -1)"
-            else
-              echo "Cloning repository..."
-              rm -rf "$HOME/telegram-order-bot"
-              git clone https://github.com/${{ github.repository }}.git "$HOME/telegram-order-bot"
-              cd "$HOME/telegram-order-bot"
-              echo "Cloned repository: $(git log --oneline -1)"
-            fi
+            cd "$HOME/telegram-order-bot"
 
-            # ── Shared Docker network (so fyp's nginx can reach coffee-bot) ──
+            # ── Pull latest code (for compose file changes) ──
+            git fetch origin main
+            git reset --hard origin/main
+            echo "Pulled: $(git log --oneline -1)"
+
+            # ── Shared Docker network ──
             docker network inspect shared >/dev/null 2>&1 || docker network create shared
 
-            # ── .env (create if missing, never overwrite secrets) ──
-            ENV_EXISTS=no
-            { [ -f .env ] && ENV_EXISTS=yes; } || true
-            if [ "$ENV_EXISTS" = "no" ]; then
-              echo "Creating .env from .env.example..."
+            # ── .env (create if missing) ──
+            if [ ! -f .env ]; then
               cp .env.example .env
-              echo "EDIT .env on the VM to fill in TELEGRAM_TOKEN, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, SESSION_SECRET, STAFF_CHAT_ID, WEBHOOK_*"
+              echo "EDIT .env on the VM to fill in secrets"
             fi
 
-            # ── Build and start the bot ──
-            echo "Building and starting the coffee order bot..."
+            # ── Pull latest image and restart ──
             timeout 30 docker compose -f docker-compose.prod.yml down || true
-            docker compose -f docker-compose.prod.yml up -d --build
+            docker compose -f docker-compose.prod.yml pull bot
+            docker compose -f docker-compose.prod.yml up -d
 
-            # ── Reload the shared edge proxy (~/server-stuff) ──
-            # nginx was decoupled from fyp's compose into its own stack at
-            # ~/server-stuff. Reload it so it picks up the new server block
-            # and can reach the freshly-started coffee-bot container.
+            # ── Reload edge nginx ──
             NGINX_RUNNING=0
             docker compose -f "$HOME/server-stuff/docker-compose.yml" ps --status running nginx 2>/dev/null | grep -q "nginx" && NGINX_RUNNING=1 || true
             if [ "$NGINX_RUNNING" = "1" ]; then
