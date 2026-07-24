@@ -37,9 +37,10 @@ jobs:
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
-      - name: Ensure package is public
+      - name: Make package public
+        continue-on-error: true
         run: |
-          gh api -X PATCH /user/packages/container/${{ github.event.repository.name }}/visibility \
+          gh api -X PATCH /users/${{ github.repository_owner }}/packages/container/${{ github.event.repository.name }}/visibility \
             -f visibility=public
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
