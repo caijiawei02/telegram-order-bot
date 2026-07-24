@@ -61,16 +61,22 @@ jobs:
 
             # ── Build and start the bot ──
             echo "Building and starting the coffee order bot..."
-            docker compose -f docker-compose.prod.yml down || true
+            timeout 30 docker compose -f docker-compose.prod.yml down || true
             docker compose -f docker-compose.prod.yml up -d --build
 
             # ── Reload the shared edge proxy (~/server-stuff) ──
             # nginx was decoupled from fyp's compose into its own stack at
             # ~/server-stuff. Reload it so it picks up the new server block
             # and can reach the freshly-started coffee-bot container.
-            docker compose -f "$HOME/server-stuff/docker-compose.yml" exec -T nginx nginx -s reload \
-              && echo "edge nginx reloaded" \
-              || echo "WARN: could not reload edge nginx"
+            NGINX_RUNNING=0
+            docker compose -f "$HOME/server-stuff/docker-compose.yml" ps --status running nginx 2>/dev/null | grep -q "nginx" && NGINX_RUNNING=1 || true
+            if [ "$NGINX_RUNNING" = "1" ]; then
+              docker compose -f "$HOME/server-stuff/docker-compose.yml" exec -T nginx nginx -s reload \
+                && echo "edge nginx reloaded" \
+                || echo "WARN: nginx reload failed"
+            else
+              echo "WARN: edge nginx container not running, skipping reload"
+            fi
 
             # ── Wait for bot health ──
             echo "Waiting for bot to become healthy..."
